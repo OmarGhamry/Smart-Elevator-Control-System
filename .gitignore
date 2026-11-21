@@ -1,0 +1,35 @@
+# Operating systems
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.user
+*.suo
+*.swp
+*~
+
+# Build output
+bin/
+obj/
+build/
+dist/
+out/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+.cache/
+
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+
+# Generated archives
+*.zip
+*.7z
+*.rar
