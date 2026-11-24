@@ -42,10 +42,10 @@ Proposed division for a seven-member team. Adjust names and workload after the t
 ### M3 — Independent Module Completion
 - Each owner completes and tests their module.
 - Publish wiring, pin assignments, interfaces, and test evidence.
-- Open pull requests for review.
+- Open Pull Requests targeting `develop`.
 
 ### M4 — Integration
-- Connect request input, scheduler, floor detection, motor control, safety, and display.
+- Integrate reviewed changes on `develop`: request input, scheduler, floor detection, motor control, safety, and display.
 - Run controlled tests with the cabin secured and a mechanical catch in place.
 - Fix integration issues before full-height operation.
 
@@ -53,14 +53,17 @@ Proposed division for a seven-member team. Adjust names and workload after the t
 - Test all four floors, simultaneous requests, both directions, idle behavior, emergency stop, and travel limits.
 - Record expected versus actual behavior.
 - Prepare final explanation, diagrams, and demonstration.
+- The repository owner promotes a verified stable milestone from `develop` to `main`.
 
 ## GitHub Workflow
 
-- Use one branch per feature or task (for example, `feature/floor-detection`).
-- Keep commits focused and descriptive.
-- Open Pull Requests against `main`.
-- Require at least one review before merging.
-- Update the relevant documentation when an interface or design decision changes.
+- `main` is the protected stable branch; only `@OmarGhamry` may push to or merge into it.
+- `develop` is the team's shared integration branch and the target for all contributor Pull Requests.
+- Create one task branch per feature or task from `develop` (for example, `feature/floor-detection`).
+- Contributors must not push directly to `develop` or `main`.
+- Open Pull Requests from task branches into `develop`, not `main`.
+- The owner/integration lead reviews and merges approved changes into `develop`.
+- Only the owner promotes stable, tested work from `develop` into `main`.
 - Do not commit credentials, personal tokens, or unrelated generated files.
 
 ## Decisions to Record at the First Team Meeting
