@@ -70,15 +70,16 @@ tests/      Test cases and verification notes
 
 The project is in the design and planning stage. First agree on requirements and interfaces, then validate the mechanical lift and select the motor/driver based on measured load and current. Firmware implementation follows after pin assignments and module interfaces are agreed.
 
-## Team Workflow
+## Team Git Workflow
 
-1. Create a branch for each feature or task.
-2. Keep commits focused and use clear commit messages.
-3. Open a Pull Request to merge work into `main`.
-4. Review changes before merging.
-5. Update documentation when a design decision changes.
+- `main` is the protected production/stable branch. Only the repository owner, `@OmarGhamry`, may push to or merge into it.
+- `develop` is the team's integration branch and the default target for all team Pull Requests.
+- Each contributor creates a task branch from `develop`, such as `feature/floor-detection`, `fix/sensor-debounce`, or `docs/update-requirements`.
+- Open Pull Requests from task branches into `develop`; never target `main` with a team PR.
+- The owner reviews and merges work into `develop`. After a stable milestone, the owner alone promotes `develop` into `main`.
+- Direct pushes and force pushes to protected branches are not part of the workflow.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/team-work-plan.md](docs/team-work-plan.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md), [GitHub Branch Protection Setup](docs/github-setup.md), and [docs/team-work-plan.md](docs/team-work-plan.md).
 
 ## Project Status
 
