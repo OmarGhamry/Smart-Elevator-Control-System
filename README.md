@@ -1,44 +1,74 @@
 # Smart Elevator Control System
 
-An academic **Computer Organization** project focused on designing a smart elevator control system.
+An academic **Computer Organization** project to build a small, working four-floor elevator model using a cardboard structure and real electronic components.
 
-## Overview
+## Project Snapshot
 
-The system is intended to manage elevator requests, coordinate movement between floors, control door operations, and handle safety-related conditions. The implementation details will be documented as the team finalizes the hardware platform and programming approach.
+| Item | Current plan |
+|---|---|
+| Floors | 4 |
+| Approximate vertical height | 80 cm (exact measurement convention to confirm) |
+| Cabin / structure | Lightweight cardboard model |
+| Main controller | ESP32-S, 38-pin development board |
+| Available alternative board | Arduino Uno (not currently planned as a second controller) |
+| Movement | One reversible DC geared motor |
+| Motor driver | H-bridge selected to match the final motor's voltage and current |
+| Floor detection | Position sensors / limit switches, final arrangement to be confirmed |
+| Doors | **Out of scope** — the cabin is treated as a controlled block; no door opening/closing mechanism |
+
+This is a working proposal for the team. Motor, driver, power supply, sensor type, dimensions, and scheduling policy must be confirmed after mechanical and electrical checks. Do not treat a product example as an approved purchase.
 
 ## Main Goals
 
-- Receive and manage floor and cabin requests.
-- Determine an appropriate movement direction and stop sequence.
-- Coordinate floor detection, motor control, and door operation.
-- Handle safety conditions such as obstruction detection and emergency stop.
-- Provide clear floor and elevator status information.
+- Accept and store cabin and/or floor requests.
+- Schedule pending requests and choose the next destination.
+- Track the cabin's actual floor using sensors.
+- Move the cabin up and down and stop at requested floors.
+- Display the current floor, direction, and operating state.
+- Provide an emergency stop and travel-limit protection.
 
 ## Planned System Modules
 
 | Module | Responsibility |
 |---|---|
-| Elevator Controller | Coordinates requests and elevator states |
-| Request Interface | Receives hall and cabin calls |
-| Floor Detection | Identifies the elevator's current floor |
-| Motor Control | Controls movement and stopping |
-| Door Control | Manages opening, closing, and obstruction handling |
-| Display | Shows floor and operating status |
-| Safety System | Handles emergency and safety conditions |
+| Main Elevator Controller | Coordinates state transitions and modules |
+| Request Manager | Reads, validates, stores, and clears requests |
+| Scheduler | Selects the next floor from pending requests |
+| Floor Detection | Identifies floor arrival from physical sensors |
+| Motor Control | Drives the DC motor through an H-bridge |
+| Safety Manager | Handles emergency stop and upper/lower travel limits |
+| Display / User Interface | Reads buttons and displays status |
+
+## High-Level Architecture
+
+```text
+Buttons ──> Request Manager ──> Scheduler ──> Main Controller
+                                              │
+Floor Sensors ──> Floor Manager ──────────────┤
+                                              v
+                                      Motor Controller
+                                              │
+                                         H-Bridge
+                                              │
+                                        DC Geared Motor
+
+Emergency Stop / Limit Protection ──> Safety Manager
+Display <── Current Floor / Direction / State
+```
 
 ## Repository Structure
 
 ```text
-docs/       Project overview, requirements, and architecture
-src/        Implementation source code (to be added)
+docs/       Scope, requirements, architecture, and team plan
+hardware/   Component list, wiring, and mechanical notes
+src/        Firmware source code (to be added)
 simulation/ Simulation files (to be added)
-hardware/   Hardware-related files (to be added)
 tests/      Test cases and verification notes
 ```
 
 ## Getting Started
 
-The project is currently in the planning stage. Setup and build instructions will be added after the team agrees on the implementation platform and tools.
+The project is in the design and planning stage. First agree on requirements and interfaces, then validate the mechanical lift and select the motor/driver based on measured load and current. Firmware implementation follows after pin assignments and module interfaces are agreed.
 
 ## Team Workflow
 
@@ -46,13 +76,13 @@ The project is currently in the planning stage. Setup and build instructions wil
 2. Keep commits focused and use clear commit messages.
 3. Open a Pull Request to merge work into `main`.
 4. Review changes before merging.
-5. Update the documentation when system behavior or design decisions change.
+5. Update documentation when a design decision changes.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/team-work-plan.md](docs/team-work-plan.md).
 
 ## Project Status
 
-🚧 In development — requirements and architecture are being defined.
+🚧 Planning — project scope is narrowed to a four-floor, cardboard elevator model with no door mechanism. Detailed design and component validation are pending.
 
 ## Academic Context
 
