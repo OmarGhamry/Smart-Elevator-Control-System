@@ -1,89 +1,88 @@
 # Smart Elevator Control System
 
-An academic **Computer Organization** project to build a small, working four-floor elevator model using a cardboard structure and real electronic components.
+An academic **Computer Organization** project to design and simulate a four-floor smart elevator, then use the validated design as the basis for a physical prototype.
 
-## Project Snapshot
+## Current Prototype
 
-| Item | Current plan |
+| Item | Validated design / current decision |
 |---|---|
 | Floors | 4 |
-| Approximate vertical height | 80 cm (exact measurement convention to confirm) |
-| Cabin / structure | Lightweight cardboard model |
-| Main controller | ESP32-S, 38-pin development board |
-| Available alternative board | Arduino Uno (not currently planned as a second controller) |
-| Movement | One reversible DC geared motor |
-| Motor driver | H-bridge selected to match the final motor's voltage and current |
-| Floor detection | Position sensors / limit switches, final arrangement to be confirmed |
-| Doors | **Out of scope** — the cabin is treated as a controlled block; no door opening/closing mechanism |
+| Main simulation controller | Arduino Uno R3 in Proteus |
+| Cabin movement | One reversible DC motor using an H-bridge |
+| Motor driver model | L298 Proteus module (TheEngineeringProjects library) |
+| Motor command | Direction pins plus PWM; current test speed is PWM 150 |
+| Floor detection | 4 IR obstacle-sensor models, one per floor |
+| IR output logic | HIGH when the simulated sensor detects the cabin; LOW otherwise |
+| User inputs | 4 hall-call buttons + 4 cabin-destination buttons |
+| Button expander | PCF8574 at I2C address 0x20 |
+| Display | Common-anode 7-segment display driven by 74HC595 |
+| Audio | Speaker connected to A1; tone generated with tone()/noTone() |
+| Emergency | Normally-closed button, active-low signal to A0, plus a hardware motor-enable gate |
+| Doors | Out of scope; no automatic door mechanism |
 
-This is a working proposal for the team. Motor, driver, power supply, sensor type, dimensions, and scheduling policy must be confirmed after mechanical and electrical checks. Do not treat a product example as an approved purchase.
+The current pin map and component behavior are documented in [hardware/wiring-and-pinout.md](hardware/wiring-and-pinout.md). Proteus tests validate the simulation model only; physical motor, sensor, power, braking, and safety behavior must be tested separately before any real-world use.
 
 ## Main Goals
 
-- Accept and store cabin and/or floor requests.
-- Schedule pending requests and choose the next destination.
-- Track the cabin's actual floor using sensors.
-- Move the cabin up and down and stop at requested floors.
-- Display the current floor, direction, and operating state.
-- Provide an emergency stop and travel-limit protection.
+- Accept and store cabin and hall requests independently.
+- Handle simultaneous button presses.
+- Schedule pending requests using a direction-based collective policy (LOOK-like).
+- Determine the current floor from the four IR sensors.
+- Drive the motor up/down and stop on a detected floor.
+- Display the current floor using the 7-segment display.
+- Provide audible arrival and fault/emergency alerts.
+- Latch an emergency stop until a deliberate reset/recovery procedure is implemented.
 
-## Planned System Modules
+## Firmware Modules
 
 | Module | Responsibility |
 |---|---|
-| Main Elevator Controller | Coordinates state transitions and modules |
-| Request Manager | Reads, validates, stores, and clears requests |
-| Scheduler | Selects the next floor from pending requests |
-| Floor Detection | Identifies floor arrival from physical sensors |
-| Motor Control | Drives the DC motor through an H-bridge |
-| Safety Manager | Handles emergency stop and upper/lower travel limits |
-| Display / User Interface | Reads buttons and displays status |
+| Input Manager | Read PCF8574 buttons and emergency signal |
+| Request Manager | Store and clear internal/external requests |
+| Position Manager | Interpret the four floor sensors and track position validity |
+| Scheduling Manager | Select the next requested floor |
+| Motor Controller | Control direction and PWM through the H-bridge |
+| Safety Manager | Latch emergency and inhibit motor operation |
+| Display Manager | Update the 7-segment display |
+| Audio Manager | Generate speaker alert patterns |
+| Elevator Controller | Coordinate the state machine and modules |
 
-## High-Level Architecture
+## Controller States
 
-```text
-Buttons ──> Request Manager ──> Scheduler ──> Main Controller
-                                              │
-Floor Sensors ──> Floor Manager ──────────────┤
-                                              v
-                                      Motor Controller
-                                              │
-                                         H-Bridge
-                                              │
-                                        DC Geared Motor
-
-Emergency Stop / Limit Protection ──> Safety Manager
-Display <── Current Floor / Direction / State
-```
+- `POSITION_UNKNOWN` — startup position has not yet been verified.
+- `IDLE` — positioned and waiting for a request.
+- `MOVING_UP` — travelling upward.
+- `MOVING_DOWN` — travelling downward.
+- `EMERGENCY` — emergency stop latched; manual recovery required.
 
 ## Repository Structure
 
 ```text
 docs/       Scope, requirements, architecture, and team plan
-hardware/   Component list, wiring, and mechanical notes
-src/        Firmware source code (to be added)
-simulation/ Simulation files (to be added)
+hardware/   Validated Proteus component list and pin/wiring reference
+src/        Arduino firmware
+simulation/ Proteus simulation files (to be added)
 tests/      Test cases and verification notes
 ```
 
-## Getting Started
+## Development Status
 
-The project is in the design and planning stage. First agree on requirements and interfaces, then validate the mechanical lift and select the motor/driver based on measured load and current. Firmware implementation follows after pin assignments and module interfaces are agreed.
+- [x] Individual Proteus tests: motor direction/PWM, emergency hardware stop, four IR sensors, eight PCF8574 buttons, 74HC595 + common-anode display, and speaker output.
+- [x] Pin assignments recorded.
+- [ ] Firmware foundation and module implementation.
+- [ ] Integrated state-machine and scheduler tests.
+- [ ] Full-system Proteus scenarios.
+- [ ] Physical prototype validation and safety review.
 
 ## Team Git Workflow
 
-- `main` is the protected production/stable branch. Only the repository owner, `@OmarGhamry`, may push to or merge into it.
-- `develop` is the team's integration branch and the default target for all team Pull Requests.
-- Each contributor creates a task branch from `develop`, such as `feature/floor-detection`, `fix/sensor-debounce`, or `docs/update-requirements`.
+- `main` is the stable/release branch. Only the repository owner, `@OmarGhamry`, may push to or merge into it.
+- `develop` is the team's integration branch and the target for all team Pull Requests.
+- Contributors create task branches from `develop`, such as `feature/floor-detection` or `fix/sensor-debounce`.
 - Open Pull Requests from task branches into `develop`; never target `main` with a team PR.
-- The owner reviews and merges work into `develop`. After a stable milestone, the owner alone promotes `develop` into `main`.
-- Direct pushes and force pushes to protected branches are not part of the workflow.
+- Stable milestones are promoted from `develop` to `main` by the owner.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [GitHub Branch Protection Setup](docs/github-setup.md), and [docs/team-work-plan.md](docs/team-work-plan.md).
-
-## Project Status
-
-🚧 Planning — project scope is narrowed to a four-floor, cardboard elevator model with no door mechanism. Detailed design and component validation are pending.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [docs/github-setup.md](docs/github-setup.md), and [docs/team-work-plan.md](docs/team-work-plan.md).
 
 ## Academic Context
 
