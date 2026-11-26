@@ -2,6 +2,14 @@
 
 An academic **Computer Organization** project to build a small, working four-floor elevator model using a cardboard structure and real electronic components.
 
+## Animated Concept Preview
+
+<p align="center">
+  <img src="./assets/elevator-concept-animation.svg" width="100%" alt="Concept animation showing the elevator cabin moving between four floors and the planned control modules" />
+</p>
+
+> This is an illustrative animation of the planned four-floor control flow, not a live simulation or proof of implemented firmware behavior.
+
 ## Project Snapshot
 
 | Item | Current plan |
