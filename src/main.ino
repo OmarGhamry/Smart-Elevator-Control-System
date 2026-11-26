@@ -15,6 +15,7 @@
 
 constexpr uint8_t FLOOR_COUNT = 4;
 constexpr uint8_t PCF8574_ADDRESS = 0x20;
+constexpr unsigned long BUTTON_SCAN_INTERVAL_MS = 20;
 
 // -----------------------------------------------------------------------------
 // Arduino Uno pin mapping
@@ -99,6 +100,38 @@ unsigned long lastDisplayUpdateMs = 0;
 unsigned long lastAudioUpdateMs = 0;
 
 // -----------------------------------------------------------------------------
+// Input Manager — PCF8574 button scanning
+// -----------------------------------------------------------------------------
+
+void readButtons() {
+  // Ask the PCF8574 for the current state of all eight button inputs.
+  if (Wire.requestFrom(PCF8574_ADDRESS, (uint8_t)1) != 1) {
+    return;  // Keep the previous snapshot if the I2C read fails.
+  }
+
+  pcf8574RawState = Wire.read();
+
+  // PCF8574 buttons are active LOW. A 1 -> 0 transition means a new press.
+  const uint8_t newlyPressed = previousPcf8574RawState & ~pcf8574RawState;
+
+  for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+    if (newlyPressed & (1 << floorIndex)) {
+      externalRequests[floorIndex] = true;
+      Serial.print(F("External request: Floor "));
+      Serial.println(floorIndex + 1);
+    }
+
+    if (newlyPressed & (1 << (floorIndex + 4))) {
+      internalRequests[floorIndex] = true;
+      Serial.print(F("Internal request: Floor "));
+      Serial.println(floorIndex + 1);
+    }
+  }
+
+  previousPcf8574RawState = pcf8574RawState;
+}
+
+// -----------------------------------------------------------------------------
 // Arduino entry points
 // -----------------------------------------------------------------------------
 
@@ -160,5 +193,11 @@ void setup() {
 }
 
 void loop() {
-  // Non-blocking module updates will be coordinated here.
+  const unsigned long now = millis();
+
+  // Scan buttons periodically without blocking the rest of the controller.
+  if (now - lastButtonScanMs >= BUTTON_SCAN_INTERVAL_MS) {
+    lastButtonScanMs = now;
+    readButtons();
+  }
 }
