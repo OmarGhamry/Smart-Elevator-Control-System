@@ -103,7 +103,56 @@ unsigned long lastAudioUpdateMs = 0;
 // -----------------------------------------------------------------------------
 
 void setup() {
-  // Hardware initialization will be added in the next implementation step.
+  // Keep the motor disabled before initializing the rest of the system.
+  pinMode(MOTOR_ENA_PIN, OUTPUT);
+  pinMode(MOTOR_IN1_PIN, OUTPUT);
+  pinMode(MOTOR_IN2_PIN, OUTPUT);
+  analogWrite(MOTOR_ENA_PIN, 0);
+  digitalWrite(MOTOR_IN1_PIN, LOW);
+  digitalWrite(MOTOR_IN2_PIN, LOW);
+
+  // Read the normally-closed emergency circuit.
+  pinMode(EMERGENCY_PIN, INPUT);
+  emergencyLatched = (digitalRead(EMERGENCY_PIN) == LOW);
+  if (emergencyLatched) {
+    elevatorState = ElevatorState::EMERGENCY;
+  }
+
+  // Speaker output.
+  pinMode(SPEAKER_PIN, OUTPUT);
+  noTone(SPEAKER_PIN);
+
+  // 74HC595 control pins and a blank common-anode display.
+  pinMode(DISPLAY_DATA_PIN, OUTPUT);
+  pinMode(DISPLAY_CLOCK_PIN, OUTPUT);
+  pinMode(DISPLAY_LATCH_PIN, OUTPUT);
+
+  digitalWrite(DISPLAY_LATCH_PIN, LOW);
+  shiftOut(DISPLAY_DATA_PIN, DISPLAY_CLOCK_PIN, MSBFIRST, 0xFF);
+  digitalWrite(DISPLAY_LATCH_PIN, HIGH);
+
+  // IR sensor outputs are digital inputs (HIGH means detection).
+  for (uint8_t i = 0; i < FLOOR_COUNT; i++) {
+    pinMode(FLOOR_SENSOR_PINS[i], INPUT);
+  }
+
+  // Release all PCF8574 quasi-bidirectional pins before reading the buttons.
+  Wire.begin();
+  Wire.beginTransmission(PCF8574_ADDRESS);
+  Wire.write(0xFF);
+  Wire.endTransmission();
+
+  pcf8574RawState = 0xFF;
+  previousPcf8574RawState = 0xFF;
+
+  // Serial is reserved for diagnostics during Proteus testing.
+  Serial.begin(9600);
+
+  const unsigned long now = millis();
+  lastButtonScanMs = now;
+  lastPositionScanMs = now;
+  lastDisplayUpdateMs = now;
+  lastAudioUpdateMs = now;
 }
 
 void loop() {
