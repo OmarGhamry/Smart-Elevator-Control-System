@@ -140,13 +140,17 @@ void setup() {
   Wire.begin();
   Wire.beginTransmission(PCF8574_ADDRESS);
   Wire.write(0xFF);
-  Wire.endTransmission();
+  const uint8_t pcf8574Status = Wire.endTransmission();
 
   pcf8574RawState = 0xFF;
   previousPcf8574RawState = 0xFF;
 
   // Serial is reserved for diagnostics during Proteus testing.
   Serial.begin(9600);
+  Serial.println(F("Smart Elevator: startup complete"));
+  Serial.println(emergencyLatched ? F("Emergency: ACTIVE") : F("Emergency: NORMAL"));
+  Serial.println(pcf8574Status == 0 ? F("PCF8574: FOUND") : F("PCF8574: NOT FOUND"));
+  Serial.println(F("Motor output: DISABLED"));
 
   const unsigned long now = millis();
   lastButtonScanMs = now;
