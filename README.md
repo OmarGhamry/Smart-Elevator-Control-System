@@ -31,7 +31,7 @@ The current pin map and component behavior are documented in [hardware/wiring-an
 - Drive the motor up/down and stop on a detected floor.
 - Display the current floor using the 7-segment display.
 - Provide audible arrival and fault/emergency alerts.
-- Latch an emergency stop until a deliberate reset/recovery procedure is implemented.
+- Latch an emergency stop until a deliberate manual reset is accepted after the emergency switch is released and the cabin position is confirmed.
 
 ## Firmware Modules
 
@@ -69,7 +69,7 @@ tests/      Test cases and verification notes
 
 - [x] Individual Proteus tests: motor direction/PWM, emergency hardware stop, four IR sensors, eight PCF8574 buttons, 74HC595 + common-anode display, and speaker output.
 - [x] Pin assignments recorded.
-- [ ] Firmware foundation and module implementation.
+- [x] Firmware foundation, Input Manager, Position Manager, Request Manager, LOOK-style Scheduling Manager, and Safety Manager implemented; Safety Manager emergency-latch/reset scenarios passed in Proteus.
 - [ ] Integrated state-machine and scheduler tests.
 - [ ] Full-system Proteus scenarios.
 - [ ] Physical prototype validation and safety review.
