@@ -70,10 +70,11 @@ tests/      Test cases and verification notes
 
 - [x] Individual Proteus tests: motor direction/PWM, emergency hardware stop, four IR sensors, eight PCF8574 buttons, 74HC595 + common-anode display, and speaker output.
 - [x] Pin assignments recorded.
-- [x] Firmware foundation, Input Manager, Position Manager, Request Manager, LOOK-style Scheduling Manager, Safety Manager, Motor Controller, and initial Elevator Controller integration implemented.
+- [x] Firmware foundation, Input Manager, Position Manager, Request Manager, LOOK-style Scheduling Manager, Safety Manager, Motor Controller, Display Manager, and initial Elevator Controller integration implemented.
 - [x] Integrated Proteus tests passed for same-floor request handling, automatic travel in both directions, intermediate-floor detection without stopping, target-floor stopping, request clearing, emergency stop during automatic movement, and manual emergency reset after position confirmation. Emergency remains latched after the button is released, and all pending requests are cleared when it is first latched.
 - [x] Direction indicator LEDs verified in integrated movement tests: green LED (D8) ON while moving up, red LED (A2) ON while moving down, and both OFF while stopped.
-- [ ] Verify manual emergency reset after an automatically interrupted trip, then complete Display Manager, Audio Manager, and broader full-system Proteus scenarios.
+- [x] Display Manager verified in integrated Proteus tests: the display shows the confirmed starting floor and updates at each detected floor while travelling, without stopping at intermediate floors.
+- [ ] Complete Audio Manager integration and broader full-system Proteus scenarios.
 - [ ] Physical prototype validation and safety review.
 
 ## Team Git Workflow
