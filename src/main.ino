@@ -119,6 +119,11 @@ enum class MotorRotation : uint8_t {
   COUNTERCLOCKWISE
 };
 
+// PROVISIONAL mapping for Proteus integration.
+// Confirm the real UP/DOWN relationship on the physical pulley before hardware use.
+constexpr MotorRotation UP_MOTOR_ROTATION = MotorRotation::COUNTERCLOCKWISE;
+constexpr MotorRotation DOWN_MOTOR_ROTATION = MotorRotation::CLOCKWISE;
+
 void stopMotor() {
   analogWrite(MOTOR_ENA_PIN, 0);
   digitalWrite(MOTOR_IN1_PIN, LOW);
@@ -552,13 +557,23 @@ void updateElevatorController() {
     return;
   }
 
-  // The motor start command will be enabled after UP/DOWN rotation mapping
-  // is confirmed for the actual pulley arrangement.
   if (targetFloor == 0) {
     stopMotor();
     if (elevatorState != ElevatorState::POSITION_UNKNOWN) {
       elevatorState = ElevatorState::IDLE;
     }
+    return;
+  }
+
+  // Translate the scheduler's logical direction into a motor rotation.
+  if (targetFloor > currentFloor) {
+    currentDirection = Direction::UP;
+    elevatorState = ElevatorState::MOVING_UP;
+    setMotorRotation(UP_MOTOR_ROTATION);
+  } else if (targetFloor < currentFloor) {
+    currentDirection = Direction::DOWN;
+    elevatorState = ElevatorState::MOVING_DOWN;
+    setMotorRotation(DOWN_MOTOR_ROTATION);
   }
 }
 
@@ -644,6 +659,9 @@ void loop() {
     lastPositionScanMs = now;
     readFloorSensors(now);
   }
+
+  // Service a newly reached target before the scheduler selects another one.
+  updateElevatorController();
 
   if (now - lastSchedulingUpdateMs >= SCHEDULING_INTERVAL_MS) {
     lastSchedulingUpdateMs = now;
