@@ -102,7 +102,6 @@ unsigned long positionStartupCheckMs = 0;
 unsigned long lastButtonScanMs = 0;
 unsigned long lastPositionScanMs = 0;
 unsigned long lastSchedulingUpdateMs = 0;
-unsigned long lastDisplayUpdateMs = 0;
 unsigned long lastAudioUpdateMs = 0;
 
 bool resetButtonStableHigh = true;
@@ -116,6 +115,46 @@ unsigned long resetButtonChangeMs = 0;
 void updateDirectionLeds() {
   digitalWrite(UP_LED_PIN, elevatorState == ElevatorState::MOVING_UP ? HIGH : LOW);
   digitalWrite(DOWN_LED_PIN, elevatorState == ElevatorState::MOVING_DOWN ? HIGH : LOW);
+}
+
+// -----------------------------------------------------------------------------
+// Display Manager — current floor on a common-anode 7-segment display
+// -----------------------------------------------------------------------------
+
+// Common-anode segments are active LOW. Bit order: DP-G-F-E-D-C-B-A.
+const uint8_t FLOOR_DISPLAY_PATTERNS[FLOOR_COUNT] = {
+  0xF9, // 1
+  0xA4, // 2
+  0xB0, // 3
+  0x99  // 4
+};
+
+uint8_t lastDisplayedFloor = 0xFF;
+
+void writeDisplayPattern(uint8_t pattern) {
+  digitalWrite(DISPLAY_LATCH_PIN, LOW);
+  shiftOut(DISPLAY_DATA_PIN, DISPLAY_CLOCK_PIN, MSBFIRST, pattern);
+  digitalWrite(DISPLAY_LATCH_PIN, HIGH);
+}
+
+void updateDisplay() {
+  // Show the last confirmed floor; blank the display when position is unknown.
+  const uint8_t floorToDisplay =
+      (positionKnown && currentFloor >= 1 && currentFloor <= FLOOR_COUNT)
+          ? currentFloor
+          : 0;
+
+  // Avoid shifting the same value repeatedly.
+  if (floorToDisplay == lastDisplayedFloor) {
+    return;
+  }
+
+  const uint8_t pattern = (floorToDisplay == 0)
+      ? 0xFF
+      : FLOOR_DISPLAY_PATTERNS[floorToDisplay - 1];
+
+  writeDisplayPattern(pattern);
+  lastDisplayedFloor = floorToDisplay;
 }
 
 // -----------------------------------------------------------------------------
@@ -665,7 +704,6 @@ void setup() {
   lastButtonScanMs = now;
   lastPositionScanMs = now;
   lastSchedulingUpdateMs = now;
-  lastDisplayUpdateMs = now;
   lastAudioUpdateMs = now;
 }
 
@@ -694,4 +732,5 @@ void loop() {
 
   updateElevatorController();
   updateDirectionLeds();
+  updateDisplay();
 }
