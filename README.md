@@ -75,7 +75,8 @@ tests/      Test cases and verification notes
 - [x] Direction indicator LEDs verified in integrated movement tests: green LED (D8) ON while moving up, red LED (A2) ON while moving down, and both OFF while stopped.
 - [x] Display Manager verified in integrated Proteus tests: the display shows the confirmed starting floor, updates at each detected floor while travelling without stopping at intermediate floors, and remains blank when the startup position is unknown.
 - [x] Audio Manager arrival notification verified: a short 1500 Hz beep plays for 150 ms when the elevator reaches its requested target floor, without blocking the main loop.
-- [ ] Emergency and position-unknown audio alerts, plus broader full-system Proteus scenarios.
+- [x] Emergency audio alert verified in Proteus: a repeating 1000 Hz pattern (120 ms ON / 120 ms OFF) overrides arrival audio and continues while emergency is latched; it stops after a valid manual reset.
+- [ ] Position-unknown audio alert and broader full-system Proteus scenarios.
 - [ ] Physical prototype validation and safety review.
 
 ## Team Git Workflow
