@@ -97,6 +97,7 @@ unsigned long positionStartupCheckMs = 0;
 
 unsigned long lastButtonScanMs = 0;
 unsigned long lastPositionScanMs = 0;
+unsigned long lastSchedulingUpdateMs = 0;
 unsigned long lastDisplayUpdateMs = 0;
 unsigned long lastAudioUpdateMs = 0;
 
@@ -267,6 +268,119 @@ void readFloorSensors(unsigned long now) {
 }
 
 // -----------------------------------------------------------------------------
+// Scheduling Manager — LOOK-style directional request selection
+// -----------------------------------------------------------------------------
+
+constexpr unsigned long SCHEDULING_INTERVAL_MS = 100;
+
+bool isFloorRequested(uint8_t floorIndex) {
+  if (floorIndex >= FLOOR_COUNT) {
+    return false;
+  }
+
+  return internalRequests[floorIndex] || externalRequests[floorIndex];
+}
+
+uint8_t findNextRequestedFloor() {
+  if (!positionKnown || currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    return 0;
+  }
+
+  // Continue in the current direction first.
+  if (currentDirection == Direction::UP) {
+    for (uint8_t floor = currentFloor + 1; floor <= FLOOR_COUNT; floor++) {
+      if (isFloorRequested(floor - 1)) {
+        return floor;
+      }
+    }
+  } else if (currentDirection == Direction::DOWN) {
+    for (int8_t floor = currentFloor - 1; floor >= 1; floor--) {
+      if (isFloorRequested((uint8_t)(floor - 1))) {
+        return (uint8_t)floor;
+      }
+    }
+  }
+
+  // No request remains ahead: look in the opposite direction.
+  if (currentDirection == Direction::UP) {
+    for (int8_t floor = currentFloor - 1; floor >= 1; floor--) {
+      if (isFloorRequested((uint8_t)(floor - 1))) {
+        return (uint8_t)floor;
+      }
+    }
+  } else if (currentDirection == Direction::DOWN) {
+    for (uint8_t floor = currentFloor + 1; floor <= FLOOR_COUNT; floor++) {
+      if (isFloorRequested(floor - 1)) {
+        return floor;
+      }
+    }
+  } else {
+    // When idle, choose the closest pending floor. Ties go to the lower floor.
+    uint8_t closestFloor = 0;
+    uint8_t closestDistance = FLOOR_COUNT + 1;
+
+    for (uint8_t floor = 1; floor <= FLOOR_COUNT; floor++) {
+      if (!isFloorRequested(floor - 1)) {
+        continue;
+      }
+
+      const uint8_t distance = (floor > currentFloor)
+          ? floor - currentFloor
+          : currentFloor - floor;
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestFloor = floor;
+      }
+    }
+
+    return closestFloor;
+  }
+
+  return 0;
+}
+
+void updateScheduling() {
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY) {
+    return;
+  }
+
+  if (!positionKnown || currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::POSITION_UNKNOWN;
+    return;
+  }
+
+  const uint8_t nextFloor = findNextRequestedFloor();
+
+  if (nextFloor == 0) {
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::IDLE;
+    return;
+  }
+
+  const uint8_t previousTarget = targetFloor;
+  const Direction previousDirection = currentDirection;
+
+  targetFloor = nextFloor;
+  currentDirection = (targetFloor > currentFloor)
+      ? Direction::UP
+      : Direction::DOWN;
+  elevatorState = (currentDirection == Direction::UP)
+      ? ElevatorState::MOVING_UP
+      : ElevatorState::MOVING_DOWN;
+
+  if (targetFloor != previousTarget || currentDirection != previousDirection) {
+    Serial.print(F("Next target: Floor "));
+    Serial.print(targetFloor);
+    Serial.print(F(" | Direction: "));
+    Serial.println(currentDirection == Direction::UP ? F("UP") : F("DOWN"));
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Arduino entry points
 // -----------------------------------------------------------------------------
 
@@ -325,6 +439,7 @@ void setup() {
   positionStartupCheckMs = now;
   lastButtonScanMs = now;
   lastPositionScanMs = now;
+  lastSchedulingUpdateMs = now;
   lastDisplayUpdateMs = now;
   lastAudioUpdateMs = now;
 }
@@ -340,5 +455,10 @@ void loop() {
   if (now - lastPositionScanMs >= POSITION_SCAN_INTERVAL_MS) {
     lastPositionScanMs = now;
     readFloorSensors(now);
+  }
+
+  if (now - lastSchedulingUpdateMs >= SCHEDULING_INTERVAL_MS) {
+    lastSchedulingUpdateMs = now;
+    updateScheduling();
   }
 }
