@@ -26,6 +26,8 @@ constexpr unsigned long RESET_DEBOUNCE_MS = 40;
 constexpr uint8_t EMERGENCY_PIN = A0;  // NC switch: HIGH = normal, LOW = pressed
 constexpr uint8_t RESET_PIN = 7;       // NO push button: LOW while pressed
 constexpr uint8_t SPEAKER_PIN   = A1;
+constexpr uint8_t UP_LED_PIN = 8;    // Green: elevator moving up
+constexpr uint8_t DOWN_LED_PIN = A2; // Red: elevator moving down
 
 constexpr uint8_t I2C_SDA_PIN = A4;
 constexpr uint8_t I2C_SCL_PIN = A5;
@@ -106,6 +108,15 @@ unsigned long lastAudioUpdateMs = 0;
 bool resetButtonStableHigh = true;
 bool resetButtonCandidateHigh = true;
 unsigned long resetButtonChangeMs = 0;
+
+// -----------------------------------------------------------------------------
+// Direction Indicator — green for UP, red for DOWN
+// -----------------------------------------------------------------------------
+
+void updateDirectionLeds() {
+  digitalWrite(UP_LED_PIN, elevatorState == ElevatorState::MOVING_UP ? HIGH : LOW);
+  digitalWrite(DOWN_LED_PIN, elevatorState == ElevatorState::MOVING_DOWN ? HIGH : LOW);
+}
 
 // -----------------------------------------------------------------------------
 // Motor Controller — direction-neutral rotation commands
@@ -610,6 +621,11 @@ void setup() {
   pinMode(SPEAKER_PIN, OUTPUT);
   noTone(SPEAKER_PIN);
 
+  pinMode(UP_LED_PIN, OUTPUT);
+  pinMode(DOWN_LED_PIN, OUTPUT);
+  digitalWrite(UP_LED_PIN, LOW);
+  digitalWrite(DOWN_LED_PIN, LOW);
+
   pinMode(DISPLAY_DATA_PIN, OUTPUT);
   pinMode(DISPLAY_CLOCK_PIN, OUTPUT);
   pinMode(DISPLAY_LATCH_PIN, OUTPUT);
@@ -677,4 +693,5 @@ void loop() {
   }
 
   updateElevatorController();
+  updateDirectionLeds();
 }
