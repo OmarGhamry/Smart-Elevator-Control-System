@@ -142,6 +142,10 @@ constexpr unsigned int EMERGENCY_BEEP_FREQUENCY_HZ = 1000;
 constexpr unsigned long EMERGENCY_BEEP_ON_MS = 120;
 constexpr unsigned long EMERGENCY_BEEP_OFF_MS = 120;
 
+constexpr unsigned int POSITION_UNKNOWN_BEEP_FREQUENCY_HZ = 600;
+constexpr unsigned long POSITION_UNKNOWN_BEEP_ON_MS = 300;
+constexpr unsigned long POSITION_UNKNOWN_BEEP_OFF_MS = 700;
+
 bool arrivalBeepPending = false;
 bool arrivalBeepActive = false;
 unsigned long arrivalBeepStartedMs = 0;
@@ -150,19 +154,26 @@ bool emergencyBeepInitialized = false;
 bool emergencyBeepActive = false;
 unsigned long emergencyBeepChangedMs = 0;
 
+bool positionUnknownBeepInitialized = false;
+bool positionUnknownBeepActive = false;
+unsigned long positionUnknownBeepChangedMs = 0;
+
 void requestArrivalBeep() {
   arrivalBeepPending = true;
 }
 
 void updateAudioManager(unsigned long now) {
-  // Emergency audio has the highest priority and overrides arrival sounds.
+  // Emergency audio has the highest priority and overrides all other sounds.
   if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY) {
     arrivalBeepPending = false;
 
-    if (arrivalBeepActive) {
+    if (arrivalBeepActive || positionUnknownBeepActive) {
       noTone(SPEAKER_PIN);
       arrivalBeepActive = false;
+      positionUnknownBeepActive = false;
     }
+
+    positionUnknownBeepInitialized = false;
 
     if (!emergencyBeepInitialized) {
       tone(SPEAKER_PIN, EMERGENCY_BEEP_FREQUENCY_HZ);
@@ -189,6 +200,43 @@ void updateAudioManager(unsigned long now) {
     noTone(SPEAKER_PIN);
     emergencyBeepInitialized = false;
     emergencyBeepActive = false;
+  }
+
+  // Alert only after startup sensor evaluation confirms an unknown position.
+  if (positionSensorsInitialized &&
+      (!positionKnown || elevatorState == ElevatorState::POSITION_UNKNOWN)) {
+    arrivalBeepPending = false;
+
+    if (arrivalBeepActive) {
+      noTone(SPEAKER_PIN);
+      arrivalBeepActive = false;
+    }
+
+    if (!positionUnknownBeepInitialized) {
+      tone(SPEAKER_PIN, POSITION_UNKNOWN_BEEP_FREQUENCY_HZ);
+      positionUnknownBeepActive = true;
+      positionUnknownBeepChangedMs = now;
+      positionUnknownBeepInitialized = true;
+    } else if (positionUnknownBeepActive &&
+               now - positionUnknownBeepChangedMs >= POSITION_UNKNOWN_BEEP_ON_MS) {
+      noTone(SPEAKER_PIN);
+      positionUnknownBeepActive = false;
+      positionUnknownBeepChangedMs = now;
+    } else if (!positionUnknownBeepActive &&
+               now - positionUnknownBeepChangedMs >= POSITION_UNKNOWN_BEEP_OFF_MS) {
+      tone(SPEAKER_PIN, POSITION_UNKNOWN_BEEP_FREQUENCY_HZ);
+      positionUnknownBeepActive = true;
+      positionUnknownBeepChangedMs = now;
+    }
+
+    return;
+  }
+
+  // Stop the position warning as soon as the cabin position is confirmed.
+  if (positionUnknownBeepInitialized) {
+    noTone(SPEAKER_PIN);
+    positionUnknownBeepInitialized = false;
+    positionUnknownBeepActive = false;
   }
 
   if (arrivalBeepPending) {
