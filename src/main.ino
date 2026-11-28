@@ -520,6 +520,49 @@ void updateScheduling() {
 }
 
 // -----------------------------------------------------------------------------
+// Elevator Controller — coordinates scheduling, position, and safe stopping
+// -----------------------------------------------------------------------------
+// Motor direction mapping is intentionally kept separate until the physical
+// UP/DOWN relationship of the pulley is confirmed.
+
+void updateElevatorController() {
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY) {
+    stopMotor();
+    return;
+  }
+
+  if (!positionKnown || currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    stopMotor();
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::POSITION_UNKNOWN;
+    return;
+  }
+
+  // If the cabin reaches its selected target, stop and serve that floor.
+  if (targetFloor != 0 && currentFloor == targetFloor) {
+    stopMotor();
+    clearFloorRequests(currentFloor - 1);
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::IDLE;
+
+    Serial.print(F("Target reached: Floor "));
+    Serial.println(currentFloor);
+    return;
+  }
+
+  // The motor start command will be enabled after UP/DOWN rotation mapping
+  // is confirmed for the actual pulley arrangement.
+  if (targetFloor == 0) {
+    stopMotor();
+    if (elevatorState != ElevatorState::POSITION_UNKNOWN) {
+      elevatorState = ElevatorState::IDLE;
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Arduino entry points
 // -----------------------------------------------------------------------------
 
@@ -606,4 +649,6 @@ void loop() {
     lastSchedulingUpdateMs = now;
     updateScheduling();
   }
+
+  updateElevatorController();
 }
