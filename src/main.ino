@@ -108,6 +108,43 @@ bool resetButtonCandidateHigh = true;
 unsigned long resetButtonChangeMs = 0;
 
 // -----------------------------------------------------------------------------
+// Motor Controller — direction-neutral rotation commands
+// -----------------------------------------------------------------------------
+// Rotation A/B are intentionally not mapped to elevator UP/DOWN yet.
+// That mapping depends on the physical motor, pulley, and rope arrangement.
+
+enum class MotorRotation : uint8_t {
+  STOPPED,
+  CLOCKWISE,
+  COUNTERCLOCKWISE
+};
+
+void stopMotor() {
+  analogWrite(MOTOR_ENA_PIN, 0);
+  digitalWrite(MOTOR_IN1_PIN, LOW);
+  digitalWrite(MOTOR_IN2_PIN, LOW);
+}
+
+void setMotorRotation(MotorRotation rotation) {
+  // Emergency always has priority over a movement command.
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY ||
+      rotation == MotorRotation::STOPPED) {
+    stopMotor();
+    return;
+  }
+
+  if (rotation == MotorRotation::CLOCKWISE) {
+    digitalWrite(MOTOR_IN1_PIN, HIGH);
+    digitalWrite(MOTOR_IN2_PIN, LOW);
+  } else {
+    digitalWrite(MOTOR_IN1_PIN, LOW);
+    digitalWrite(MOTOR_IN2_PIN, HIGH);
+  }
+
+  analogWrite(MOTOR_ENA_PIN, DEFAULT_MOTOR_PWM);
+}
+
+// -----------------------------------------------------------------------------
 // Request Manager — stores and clears floor requests
 // -----------------------------------------------------------------------------
 
