@@ -2,50 +2,47 @@
 
 ## Purpose
 
-Build a small, working smart elevator model for the Computer Organization course. The model demonstrates request handling, scheduling, position sensing, bidirectional motor control, and safety handling.
+Build a four-floor smart elevator model for the Computer Organization course. The project demonstrates button input handling, request management, direction-based scheduling, floor sensing, bidirectional motor control, display output, and emergency handling.
 
-## Current Scope
+## Current Validated Simulation
 
-- One cabin serving **four floors**.
-- Cardboard structure and lightweight cardboard cabin.
-- Approximate vertical height: **80 cm** (the team must confirm whether this is total structure height or Floor 1-to-Floor 4 travel).
-- ESP32-S 38-pin as the planned main controller.
-- One reversible DC motor with a suitable gearbox, driven through an H-bridge.
-- Physical floor-position sensing.
-- Request buttons and a status display.
-- Emergency stop and upper/lower travel-limit protection.
-- **No door mechanism:** the cabin is treated as a single block; door opening/closing is not modeled.
+- Four floors.
+- Arduino Uno R3 as the Proteus simulation controller.
+- Four IR obstacle-sensor models, one at each floor.
+- Eight request buttons: four external hall calls and four internal cabin destinations.
+- PCF8574 I2C expander at address 0x20.
+- L298 H-bridge Proteus module and a reversible DC motor.
+- 74HC595 driving a common-anode 7-segment display.
+- Speaker on A1 for audible alerts.
+- Normally-closed emergency button read on A0; the emergency signal is HIGH normally and LOW when pressed.
+- Emergency hardware gate forces motor enable low when the emergency switch is pressed.
+- No automatic door mechanism.
 
-## High-Level Operating Cycle
+## Current Pin Map
 
-1. Initialize inputs, outputs, display, and safety signals.
-2. Establish or verify the cabin's current position (homing strategy TBD).
-3. Read and validate new floor requests.
-4. Store pending requests.
-5. Check emergency and travel-limit conditions.
-6. Scheduler selects the next destination.
-7. Motor controller moves the cabin in the selected direction.
-8. Floor sensor confirms arrival; motor is stopped.
-9. Update the current floor and display; clear the served request.
-10. Repeat until no requests remain, then remain idle.
+See [../hardware/wiring-and-pinout.md](../hardware/wiring-and-pinout.md) for the complete mapping. Arduino pins currently reserved include A0/A1/A4/A5 and D2-D6/D9-D13.
 
-## Current Hardware Candidates (Not Yet Approved)
+## Operating Cycle (Target Firmware)
 
-- ESP32-S 38-pin development board.
-- TT 3–6V DC geared motor as a low-cost candidate for a very light model.
-- A higher-torque metal-geared DC motor (for example, a JGB37-520 variant) as an alternative if the load and test results require it.
-- H-bridge such as DRV8833 or TB6612FNG only if its voltage/current ratings suit the selected motor.
-- Limit switches or Hall sensors for floor detection.
-- External motor power supply selected from motor specifications.
+1. Initialize the I/O devices and safety signal.
+2. Start in `POSITION_UNKNOWN` until a valid floor sensor establishes position.
+3. Scan the eight buttons and capture new presses without blocking.
+4. Store internal and external requests independently.
+5. Check the emergency input continuously and latch emergency when activated.
+6. When position is known and no emergency is active, ask the scheduler for the next destination.
+7. Drive the motor in the selected direction.
+8. Stop when the target-floor sensor confirms arrival.
+9. Update the current floor, display, and request state.
+10. Continue servicing requests until none remain, then stay in `IDLE`.
 
-Do not purchase based only on nominal voltage or advertised stall torque. First estimate cabin plus payload mass, drum radius, friction, required speed, motor current, and driver thermal/current limits.
+## Important Simulation Notes
 
-## Assumptions to Confirm
+- The tested IR model output is HIGH when its TEST PIN is HIGH (simulated detection) and LOW otherwise.
+- The tested PCF8574 address is 0x20 with A0/A1/A2 grounded. Buttons are active LOW on P0-P7.
+- The common-anode 7-segment segments are active LOW and are driven through individual current-limiting resistors.
+- The speaker produces a cleaner tone with `tone()` / `noTone()` than with a constant HIGH level.
+- The current motor PWM test value is 150; it is a simulation starting point, not a calibrated physical speed.
 
-- Exact floor spacing and what the 80 cm measurement represents.
-- Cabin dimensions and maximum payload.
-- Mechanical lift method and safe cabin guidance/retention.
-- Motor, gearbox, driver, supply, and sensor models.
-- Button arrangement and scheduling policy.
-- Homing and fault recovery behavior.
-- Final demonstration and course requirements.
+## Limitations and Next Validation
+
+Proteus tests verify the configured simulation models and firmware logic, not the real sensor range, motor inertia, mechanical alignment, load capacity, braking, current limits, or safety performance. The physical prototype must be tested separately and must not be operated as a passenger elevator.

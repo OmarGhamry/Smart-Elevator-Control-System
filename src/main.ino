@@ -1,0 +1,862 @@
+/*
+  Smart Elevator Control System
+  Arduino Uno R3 / Proteus simulation.
+*/
+
+#include <Arduino.h>
+#include <Wire.h>
+
+// -----------------------------------------------------------------------------
+// System configuration
+// -----------------------------------------------------------------------------
+
+constexpr uint8_t FLOOR_COUNT = 4;
+constexpr uint8_t PCF8574_ADDRESS = 0x20;
+constexpr unsigned long BUTTON_SCAN_INTERVAL_MS = 20;
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 40;
+constexpr unsigned long POSITION_SCAN_INTERVAL_MS = 20;
+constexpr unsigned long SENSOR_DEBOUNCE_MS = 30;
+constexpr unsigned long POSITION_STARTUP_CHECK_MS = 50;
+constexpr unsigned long RESET_DEBOUNCE_MS = 40;
+
+// -----------------------------------------------------------------------------
+// Arduino Uno pin mapping
+// -----------------------------------------------------------------------------
+
+constexpr uint8_t EMERGENCY_PIN = A0;  // NC switch: HIGH = normal, LOW = pressed
+constexpr uint8_t RESET_PIN = 7;       // NO push button: LOW while pressed
+constexpr uint8_t SPEAKER_PIN   = A1;
+constexpr uint8_t UP_LED_PIN = 8;    // Green: elevator moving up
+constexpr uint8_t DOWN_LED_PIN = A2; // Red: elevator moving down
+
+constexpr uint8_t I2C_SDA_PIN = A4;
+constexpr uint8_t I2C_SCL_PIN = A5;
+
+constexpr uint8_t DISPLAY_DATA_PIN  = 2;
+constexpr uint8_t DISPLAY_CLOCK_PIN = 3;
+constexpr uint8_t DISPLAY_LATCH_PIN = 4;
+
+constexpr uint8_t MOTOR_IN1_PIN = 5;
+constexpr uint8_t MOTOR_IN2_PIN = 6;
+constexpr uint8_t MOTOR_ENA_PIN = 9;
+constexpr uint8_t DEFAULT_MOTOR_PWM = 150;
+
+const uint8_t FLOOR_SENSOR_PINS[FLOOR_COUNT] = {10, 11, 12, 13};
+constexpr uint8_t FLOOR_SENSOR_ACTIVE_LEVEL = HIGH;
+
+// -----------------------------------------------------------------------------
+// PCF8574 button mapping
+// -----------------------------------------------------------------------------
+
+enum ButtonBit : uint8_t {
+  EXTERNAL_FLOOR_1 = 0,
+  EXTERNAL_FLOOR_2 = 1,
+  EXTERNAL_FLOOR_3 = 2,
+  EXTERNAL_FLOOR_4 = 3,
+  INTERNAL_FLOOR_1 = 4,
+  INTERNAL_FLOOR_2 = 5,
+  INTERNAL_FLOOR_3 = 6,
+  INTERNAL_FLOOR_4 = 7
+};
+
+// -----------------------------------------------------------------------------
+// Shared application state
+// -----------------------------------------------------------------------------
+
+enum class ElevatorState : uint8_t {
+  POSITION_UNKNOWN,
+  IDLE,
+  MOVING_UP,
+  MOVING_DOWN,
+  EMERGENCY
+};
+
+enum class Direction : int8_t {
+  DOWN = -1,
+  STOPPED = 0,
+  UP = 1
+};
+
+// Floors are numbered 1..4. Zero means that the position is unknown.
+uint8_t currentFloor = 0;
+uint8_t targetFloor = 0;
+Direction currentDirection = Direction::STOPPED;
+ElevatorState elevatorState = ElevatorState::POSITION_UNKNOWN;
+bool positionKnown = false;
+bool emergencyLatched = false;
+
+bool internalRequests[FLOOR_COUNT] = {false};
+bool externalRequests[FLOOR_COUNT] = {false};
+
+uint8_t pcf8574RawState = 0xFF;
+uint8_t candidatePcf8574State = 0xFF;
+uint8_t previousPcf8574RawState = 0xFF;
+unsigned long buttonStateChangeMs[8] = {0};
+
+bool floorSensorStates[FLOOR_COUNT] = {false};
+bool candidateFloorSensorStates[FLOOR_COUNT] = {false};
+unsigned long floorSensorChangeMs[FLOOR_COUNT] = {0};
+bool positionSensorsInitialized = false;
+unsigned long positionStartupCheckMs = 0;
+
+unsigned long lastButtonScanMs = 0;
+unsigned long lastPositionScanMs = 0;
+unsigned long lastSchedulingUpdateMs = 0;
+unsigned long lastAudioUpdateMs = 0;
+
+bool resetButtonStableHigh = true;
+bool resetButtonCandidateHigh = true;
+unsigned long resetButtonChangeMs = 0;
+
+// -----------------------------------------------------------------------------
+// Direction Indicator — green for UP, red for DOWN
+// -----------------------------------------------------------------------------
+
+void updateDirectionLeds() {
+  digitalWrite(UP_LED_PIN, elevatorState == ElevatorState::MOVING_UP ? HIGH : LOW);
+  digitalWrite(DOWN_LED_PIN, elevatorState == ElevatorState::MOVING_DOWN ? HIGH : LOW);
+}
+
+// -----------------------------------------------------------------------------
+// Display Manager — current floor on a common-anode 7-segment display
+// -----------------------------------------------------------------------------
+
+// Common-anode segments are active LOW. Bit order: DP-G-F-E-D-C-B-A.
+const uint8_t FLOOR_DISPLAY_PATTERNS[FLOOR_COUNT] = {
+  0xF9, // 1
+  0xA4, // 2
+  0xB0, // 3
+  0x99  // 4
+};
+
+uint8_t lastDisplayedFloor = 0xFF;
+
+// -----------------------------------------------------------------------------
+// Audio Manager — non-blocking arrival and emergency notifications
+// -----------------------------------------------------------------------------
+
+constexpr unsigned int ARRIVAL_BEEP_FREQUENCY_HZ = 1500;
+constexpr unsigned long ARRIVAL_BEEP_DURATION_MS = 150;
+
+constexpr unsigned int EMERGENCY_BEEP_FREQUENCY_HZ = 1000;
+constexpr unsigned long EMERGENCY_BEEP_ON_MS = 120;
+constexpr unsigned long EMERGENCY_BEEP_OFF_MS = 120;
+
+constexpr unsigned int POSITION_UNKNOWN_BEEP_FREQUENCY_HZ = 600;
+constexpr unsigned long POSITION_UNKNOWN_BEEP_ON_MS = 300;
+constexpr unsigned long POSITION_UNKNOWN_BEEP_OFF_MS = 700;
+
+bool arrivalBeepPending = false;
+bool arrivalBeepActive = false;
+unsigned long arrivalBeepStartedMs = 0;
+
+bool emergencyBeepInitialized = false;
+bool emergencyBeepActive = false;
+unsigned long emergencyBeepChangedMs = 0;
+
+bool positionUnknownBeepInitialized = false;
+bool positionUnknownBeepActive = false;
+unsigned long positionUnknownBeepChangedMs = 0;
+
+void requestArrivalBeep() {
+  arrivalBeepPending = true;
+}
+
+void updateAudioManager(unsigned long now) {
+  // Emergency audio has the highest priority and overrides all other sounds.
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY) {
+    arrivalBeepPending = false;
+
+    if (arrivalBeepActive || positionUnknownBeepActive) {
+      noTone(SPEAKER_PIN);
+      arrivalBeepActive = false;
+      positionUnknownBeepActive = false;
+    }
+
+    positionUnknownBeepInitialized = false;
+
+    if (!emergencyBeepInitialized) {
+      tone(SPEAKER_PIN, EMERGENCY_BEEP_FREQUENCY_HZ);
+      emergencyBeepActive = true;
+      emergencyBeepChangedMs = now;
+      emergencyBeepInitialized = true;
+    } else if (emergencyBeepActive &&
+               now - emergencyBeepChangedMs >= EMERGENCY_BEEP_ON_MS) {
+      noTone(SPEAKER_PIN);
+      emergencyBeepActive = false;
+      emergencyBeepChangedMs = now;
+    } else if (!emergencyBeepActive &&
+               now - emergencyBeepChangedMs >= EMERGENCY_BEEP_OFF_MS) {
+      tone(SPEAKER_PIN, EMERGENCY_BEEP_FREQUENCY_HZ);
+      emergencyBeepActive = true;
+      emergencyBeepChangedMs = now;
+    }
+
+    return;
+  }
+
+  // Stop and reset the emergency pattern after a valid manual reset.
+  if (emergencyBeepInitialized) {
+    noTone(SPEAKER_PIN);
+    emergencyBeepInitialized = false;
+    emergencyBeepActive = false;
+  }
+
+  // Alert only after startup sensor evaluation confirms an unknown position.
+  if (positionSensorsInitialized &&
+      (!positionKnown || elevatorState == ElevatorState::POSITION_UNKNOWN)) {
+    arrivalBeepPending = false;
+
+    if (arrivalBeepActive) {
+      noTone(SPEAKER_PIN);
+      arrivalBeepActive = false;
+    }
+
+    if (!positionUnknownBeepInitialized) {
+      tone(SPEAKER_PIN, POSITION_UNKNOWN_BEEP_FREQUENCY_HZ);
+      positionUnknownBeepActive = true;
+      positionUnknownBeepChangedMs = now;
+      positionUnknownBeepInitialized = true;
+    } else if (positionUnknownBeepActive &&
+               now - positionUnknownBeepChangedMs >= POSITION_UNKNOWN_BEEP_ON_MS) {
+      noTone(SPEAKER_PIN);
+      positionUnknownBeepActive = false;
+      positionUnknownBeepChangedMs = now;
+    } else if (!positionUnknownBeepActive &&
+               now - positionUnknownBeepChangedMs >= POSITION_UNKNOWN_BEEP_OFF_MS) {
+      tone(SPEAKER_PIN, POSITION_UNKNOWN_BEEP_FREQUENCY_HZ);
+      positionUnknownBeepActive = true;
+      positionUnknownBeepChangedMs = now;
+    }
+
+    return;
+  }
+
+  // Stop the position warning as soon as the cabin position is confirmed.
+  if (positionUnknownBeepInitialized) {
+    noTone(SPEAKER_PIN);
+    positionUnknownBeepInitialized = false;
+    positionUnknownBeepActive = false;
+  }
+
+  if (arrivalBeepPending) {
+    tone(SPEAKER_PIN, ARRIVAL_BEEP_FREQUENCY_HZ);
+    arrivalBeepStartedMs = now;
+    arrivalBeepActive = true;
+    arrivalBeepPending = false;
+  }
+
+  if (arrivalBeepActive &&
+      now - arrivalBeepStartedMs >= ARRIVAL_BEEP_DURATION_MS) {
+    noTone(SPEAKER_PIN);
+    arrivalBeepActive = false;
+  }
+}
+
+// -----------------------------------------------------------------------------
+
+void writeDisplayPattern(uint8_t pattern) {
+  digitalWrite(DISPLAY_LATCH_PIN, LOW);
+  shiftOut(DISPLAY_DATA_PIN, DISPLAY_CLOCK_PIN, MSBFIRST, pattern);
+  digitalWrite(DISPLAY_LATCH_PIN, HIGH);
+}
+
+void updateDisplay() {
+  // Show the last confirmed floor; blank the display when position is unknown.
+  const uint8_t floorToDisplay =
+      (positionKnown && currentFloor >= 1 && currentFloor <= FLOOR_COUNT)
+          ? currentFloor
+          : 0;
+
+  // Avoid shifting the same value repeatedly.
+  if (floorToDisplay == lastDisplayedFloor) {
+    return;
+  }
+
+  const uint8_t pattern = (floorToDisplay == 0)
+      ? 0xFF
+      : FLOOR_DISPLAY_PATTERNS[floorToDisplay - 1];
+
+  writeDisplayPattern(pattern);
+  lastDisplayedFloor = floorToDisplay;
+}
+
+// -----------------------------------------------------------------------------
+// Motor Controller — direction-neutral rotation commands
+// -----------------------------------------------------------------------------
+// Rotation A/B are intentionally not mapped to elevator UP/DOWN yet.
+// That mapping depends on the physical motor, pulley, and rope arrangement.
+
+enum class MotorRotation : uint8_t {
+  STOPPED,
+  CLOCKWISE,
+  COUNTERCLOCKWISE
+};
+
+// PROVISIONAL mapping for Proteus integration.
+// Confirm the real UP/DOWN relationship on the physical pulley before hardware use.
+constexpr MotorRotation UP_MOTOR_ROTATION = MotorRotation::COUNTERCLOCKWISE;
+constexpr MotorRotation DOWN_MOTOR_ROTATION = MotorRotation::CLOCKWISE;
+
+void stopMotor() {
+  analogWrite(MOTOR_ENA_PIN, 0);
+  digitalWrite(MOTOR_IN1_PIN, LOW);
+  digitalWrite(MOTOR_IN2_PIN, LOW);
+}
+
+void setMotorRotation(MotorRotation rotation) {
+  // Emergency always has priority over a movement command.
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY ||
+      rotation == MotorRotation::STOPPED) {
+    stopMotor();
+    return;
+  }
+
+  if (rotation == MotorRotation::CLOCKWISE) {
+    digitalWrite(MOTOR_IN1_PIN, HIGH);
+    digitalWrite(MOTOR_IN2_PIN, LOW);
+  } else {
+    digitalWrite(MOTOR_IN1_PIN, LOW);
+    digitalWrite(MOTOR_IN2_PIN, HIGH);
+  }
+
+  analogWrite(MOTOR_ENA_PIN, DEFAULT_MOTOR_PWM);
+}
+
+// -----------------------------------------------------------------------------
+// Request Manager — stores and clears floor requests
+// -----------------------------------------------------------------------------
+
+void addInternalRequest(uint8_t floorIndex) {
+  if (floorIndex < FLOOR_COUNT) {
+    internalRequests[floorIndex] = true;
+  }
+}
+
+void addExternalRequest(uint8_t floorIndex) {
+  if (floorIndex < FLOOR_COUNT) {
+    externalRequests[floorIndex] = true;
+  }
+}
+
+bool hasRequests() {
+  for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+    if (internalRequests[floorIndex] || externalRequests[floorIndex]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void clearFloorRequests(uint8_t floorIndex) {
+  if (floorIndex >= FLOOR_COUNT) {
+    return;
+  }
+
+  const bool hadRequest =
+      internalRequests[floorIndex] || externalRequests[floorIndex];
+
+  internalRequests[floorIndex] = false;
+  externalRequests[floorIndex] = false;
+
+  if (hadRequest) {
+    Serial.print(F("Requests cleared at Floor "));
+    Serial.println(floorIndex + 1);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Input Manager — PCF8574 buttons with per-button debouncing
+// -----------------------------------------------------------------------------
+
+void registerButtonPress(uint8_t buttonBit) {
+  if (buttonBit < 4) {
+    addExternalRequest(buttonBit);
+    Serial.print(F("External request: Floor "));
+    Serial.println(buttonBit + 1);
+  } else {
+    const uint8_t floorIndex = buttonBit - 4;
+    addInternalRequest(floorIndex);
+    Serial.print(F("Internal request: Floor "));
+    Serial.println(floorIndex + 1);
+  }
+}
+
+void readButtons(unsigned long now) {
+  if (Wire.requestFrom(PCF8574_ADDRESS, (uint8_t)1) != 1) {
+    return;
+  }
+
+  pcf8574RawState = Wire.read();
+
+  for (uint8_t buttonBit = 0; buttonBit < 8; buttonBit++) {
+    const uint8_t mask = (uint8_t)(1U << buttonBit);
+    const bool rawIsHigh = (pcf8574RawState & mask) != 0;
+    const bool candidateIsHigh = (candidatePcf8574State & mask) != 0;
+    const bool stableIsHigh = (previousPcf8574RawState & mask) != 0;
+
+    if (rawIsHigh != candidateIsHigh) {
+      if (rawIsHigh) {
+        candidatePcf8574State |= mask;
+      } else {
+        candidatePcf8574State &= (uint8_t)~mask;
+      }
+      buttonStateChangeMs[buttonBit] = now;
+    }
+
+    const bool updatedCandidateIsHigh = (candidatePcf8574State & mask) != 0;
+    if (updatedCandidateIsHigh != stableIsHigh &&
+        now - buttonStateChangeMs[buttonBit] >= BUTTON_DEBOUNCE_MS) {
+      if (updatedCandidateIsHigh) {
+        previousPcf8574RawState |= mask;
+      } else {
+        previousPcf8574RawState &= (uint8_t)~mask;
+        registerButtonPress(buttonBit);
+      }
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Position Manager — four IR floor sensors
+// -----------------------------------------------------------------------------
+
+void readFloorSensors(unsigned long now) {
+  bool allSensorsStable = true;
+
+  for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+    const bool rawDetected =
+        (digitalRead(FLOOR_SENSOR_PINS[floorIndex]) == FLOOR_SENSOR_ACTIVE_LEVEL);
+
+    if (rawDetected != candidateFloorSensorStates[floorIndex]) {
+      candidateFloorSensorStates[floorIndex] = rawDetected;
+      floorSensorChangeMs[floorIndex] = now;
+    }
+
+    if (candidateFloorSensorStates[floorIndex] != floorSensorStates[floorIndex]) {
+      if (now - floorSensorChangeMs[floorIndex] >= SENSOR_DEBOUNCE_MS) {
+        const bool wasDetected = floorSensorStates[floorIndex];
+        floorSensorStates[floorIndex] = candidateFloorSensorStates[floorIndex];
+
+        // After startup calibration, only a new inactive -> active transition
+        // represents a newly reached floor.
+        if (positionSensorsInitialized &&
+            !wasDetected && floorSensorStates[floorIndex]) {
+          currentFloor = floorIndex + 1;
+          positionKnown = true;
+
+          Serial.print(F("Position detected: Floor "));
+          Serial.println(currentFloor);
+        }
+      } else {
+        allSensorsStable = false;
+      }
+    }
+  }
+
+  // At startup, wait until every sensor has settled before determining whether
+  // the cabin is already aligned with exactly one floor sensor.
+  if (!positionSensorsInitialized &&
+      allSensorsStable &&
+      now - positionStartupCheckMs >= POSITION_STARTUP_CHECK_MS) {
+    uint8_t detectedCount = 0;
+    uint8_t detectedFloor = 0;
+
+    for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+      if (floorSensorStates[floorIndex]) {
+        detectedCount++;
+        detectedFloor = floorIndex + 1;
+      }
+    }
+
+    if (detectedCount == 1) {
+      currentFloor = detectedFloor;
+      positionKnown = true;
+      Serial.print(F("Initial position: Floor "));
+      Serial.println(currentFloor);
+    } else {
+      currentFloor = 0;
+      positionKnown = false;
+
+      if (detectedCount == 0) {
+        Serial.println(F("Initial position: UNKNOWN (no floor sensor active)"));
+      } else {
+        Serial.println(F("Initial position: UNKNOWN (multiple floor sensors active)"));
+      }
+    }
+
+    positionSensorsInitialized = true;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Safety Manager — emergency latch and guarded manual reset
+// -----------------------------------------------------------------------------
+
+bool isPositionConfirmedForReset() {
+  if (!positionSensorsInitialized || !positionKnown ||
+      currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    return false;
+  }
+
+  uint8_t activeSensorCount = 0;
+  uint8_t activeFloor = 0;
+
+  for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+    if (floorSensorStates[floorIndex]) {
+      activeSensorCount++;
+      activeFloor = floorIndex + 1;
+    }
+  }
+
+  return activeSensorCount == 1 && activeFloor == currentFloor;
+}
+
+void attemptEmergencyReset() {
+  if (!emergencyLatched) {
+    return;
+  }
+
+  // The emergency NC switch must be released before reset is accepted.
+  if (digitalRead(EMERGENCY_PIN) == LOW) {
+    Serial.println(F("Reset denied: emergency button is still pressed"));
+    return;
+  }
+
+  // Never resume motion from an uncertain or unconfirmed cabin position.
+  if (!isPositionConfirmedForReset()) {
+    Serial.println(F("Reset denied: position is not confirmed"));
+    return;
+  }
+
+  emergencyLatched = false;
+  targetFloor = 0;
+  currentDirection = Direction::STOPPED;
+  elevatorState = ElevatorState::IDLE;
+
+  Serial.println(F("Emergency: RESET COMPLETE"));
+}
+
+void updateSafetyManager(unsigned long now) {
+  // Latch the emergency state. Releasing the NC button does not clear it.
+  if (digitalRead(EMERGENCY_PIN) == LOW && !emergencyLatched) {
+    emergencyLatched = true;
+
+    // Emergency cancels every pending cabin and hall request.
+    for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+      internalRequests[floorIndex] = false;
+      externalRequests[floorIndex] = false;
+    }
+
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::EMERGENCY;
+    Serial.println(F("Emergency: LATCHED"));
+    Serial.println(F("All pending requests cleared"));
+  }
+
+  // Keep the Arduino motor command disabled for the entire latched state.
+  if (emergencyLatched) {
+    analogWrite(MOTOR_ENA_PIN, 0);
+    elevatorState = ElevatorState::EMERGENCY;
+  }
+
+  // Debounce the normally-open reset button (INPUT_PULLUP).
+  const bool rawResetHigh = (digitalRead(RESET_PIN) == HIGH);
+
+  if (rawResetHigh != resetButtonCandidateHigh) {
+    resetButtonCandidateHigh = rawResetHigh;
+    resetButtonChangeMs = now;
+  }
+
+  if (resetButtonCandidateHigh != resetButtonStableHigh &&
+      now - resetButtonChangeMs >= RESET_DEBOUNCE_MS) {
+    const bool wasHigh = resetButtonStableHigh;
+    resetButtonStableHigh = resetButtonCandidateHigh;
+
+    // A HIGH -> LOW transition is one deliberate reset-button press.
+    if (wasHigh && !resetButtonStableHigh) {
+      attemptEmergencyReset();
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Scheduling Manager — LOOK-style directional request selection
+// -----------------------------------------------------------------------------
+
+constexpr unsigned long SCHEDULING_INTERVAL_MS = 100;
+
+bool isFloorRequested(uint8_t floorIndex) {
+  if (floorIndex >= FLOOR_COUNT) {
+    return false;
+  }
+
+  return internalRequests[floorIndex] || externalRequests[floorIndex];
+}
+
+uint8_t findNextRequestedFloor() {
+  if (!positionKnown || currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    return 0;
+  }
+
+  // Continue in the current direction first.
+  if (currentDirection == Direction::UP) {
+    for (uint8_t floor = currentFloor + 1; floor <= FLOOR_COUNT; floor++) {
+      if (isFloorRequested(floor - 1)) {
+        return floor;
+      }
+    }
+  } else if (currentDirection == Direction::DOWN) {
+    for (int8_t floor = currentFloor - 1; floor >= 1; floor--) {
+      if (isFloorRequested((uint8_t)(floor - 1))) {
+        return (uint8_t)floor;
+      }
+    }
+  }
+
+  // No request remains ahead: look in the opposite direction.
+  if (currentDirection == Direction::UP) {
+    for (int8_t floor = currentFloor - 1; floor >= 1; floor--) {
+      if (isFloorRequested((uint8_t)(floor - 1))) {
+        return (uint8_t)floor;
+      }
+    }
+  } else if (currentDirection == Direction::DOWN) {
+    for (uint8_t floor = currentFloor + 1; floor <= FLOOR_COUNT; floor++) {
+      if (isFloorRequested(floor - 1)) {
+        return floor;
+      }
+    }
+  } else {
+    // When idle, choose the closest pending floor. Ties go to the lower floor.
+    uint8_t closestFloor = 0;
+    uint8_t closestDistance = FLOOR_COUNT + 1;
+
+    for (uint8_t floor = 1; floor <= FLOOR_COUNT; floor++) {
+      if (!isFloorRequested(floor - 1)) {
+        continue;
+      }
+
+      const uint8_t distance = (floor > currentFloor)
+          ? floor - currentFloor
+          : currentFloor - floor;
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestFloor = floor;
+      }
+    }
+
+    return closestFloor;
+  }
+
+  return 0;
+}
+
+void updateScheduling() {
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY) {
+    return;
+  }
+
+  if (!positionKnown || currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::POSITION_UNKNOWN;
+    return;
+  }
+
+  // A request for the floor the cabin is already on must be served
+  // immediately; it must never be interpreted as a DOWN movement.
+  if (isFloorRequested(currentFloor - 1)) {
+    clearFloorRequests(currentFloor - 1);
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::IDLE;
+    Serial.print(F("Current floor request served: Floor "));
+    Serial.println(currentFloor);
+    return;
+  }
+
+  const uint8_t nextFloor = findNextRequestedFloor();
+
+  if (nextFloor == 0) {
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::IDLE;
+    return;
+  }
+
+  const uint8_t previousTarget = targetFloor;
+  const Direction previousDirection = currentDirection;
+
+  targetFloor = nextFloor;
+  currentDirection = (targetFloor > currentFloor)
+      ? Direction::UP
+      : Direction::DOWN;
+  elevatorState = (currentDirection == Direction::UP)
+      ? ElevatorState::MOVING_UP
+      : ElevatorState::MOVING_DOWN;
+
+  if (targetFloor != previousTarget || currentDirection != previousDirection) {
+    Serial.print(F("Next target: Floor "));
+    Serial.print(targetFloor);
+    Serial.print(F(" | Direction: "));
+    Serial.println(currentDirection == Direction::UP ? F("UP") : F("DOWN"));
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Elevator Controller — coordinates scheduling, position, and safe stopping
+// -----------------------------------------------------------------------------
+// Motor direction mapping is intentionally kept separate until the physical
+// UP/DOWN relationship of the pulley is confirmed.
+
+void updateElevatorController() {
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY) {
+    stopMotor();
+    return;
+  }
+
+  if (!positionKnown || currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    stopMotor();
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::POSITION_UNKNOWN;
+    return;
+  }
+
+  // If the cabin reaches its selected target, stop and serve that floor.
+  if (targetFloor != 0 && currentFloor == targetFloor) {
+    stopMotor();
+    clearFloorRequests(currentFloor - 1);
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::IDLE;
+
+    Serial.print(F("Target reached: Floor "));
+    Serial.println(currentFloor);
+    requestArrivalBeep();
+    return;
+  }
+
+  if (targetFloor == 0) {
+    stopMotor();
+    if (elevatorState != ElevatorState::POSITION_UNKNOWN) {
+      elevatorState = ElevatorState::IDLE;
+    }
+    return;
+  }
+
+  // Translate the scheduler's logical direction into a motor rotation.
+  if (targetFloor > currentFloor) {
+    currentDirection = Direction::UP;
+    elevatorState = ElevatorState::MOVING_UP;
+    setMotorRotation(UP_MOTOR_ROTATION);
+  } else if (targetFloor < currentFloor) {
+    currentDirection = Direction::DOWN;
+    elevatorState = ElevatorState::MOVING_DOWN;
+    setMotorRotation(DOWN_MOTOR_ROTATION);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Arduino entry points
+// -----------------------------------------------------------------------------
+
+void setup() {
+  // Disable the motor before initializing the rest of the system.
+  pinMode(MOTOR_ENA_PIN, OUTPUT);
+  pinMode(MOTOR_IN1_PIN, OUTPUT);
+  pinMode(MOTOR_IN2_PIN, OUTPUT);
+  analogWrite(MOTOR_ENA_PIN, 0);
+  digitalWrite(MOTOR_IN1_PIN, LOW);
+  digitalWrite(MOTOR_IN2_PIN, LOW);
+
+  pinMode(EMERGENCY_PIN, INPUT);
+  pinMode(RESET_PIN, INPUT_PULLUP);
+  resetButtonStableHigh = (digitalRead(RESET_PIN) == HIGH);
+  resetButtonCandidateHigh = resetButtonStableHigh;
+  emergencyLatched = (digitalRead(EMERGENCY_PIN) == LOW);
+  if (emergencyLatched) {
+    elevatorState = ElevatorState::EMERGENCY;
+  }
+
+  pinMode(SPEAKER_PIN, OUTPUT);
+  noTone(SPEAKER_PIN);
+
+  pinMode(UP_LED_PIN, OUTPUT);
+  pinMode(DOWN_LED_PIN, OUTPUT);
+  digitalWrite(UP_LED_PIN, LOW);
+  digitalWrite(DOWN_LED_PIN, LOW);
+
+  pinMode(DISPLAY_DATA_PIN, OUTPUT);
+  pinMode(DISPLAY_CLOCK_PIN, OUTPUT);
+  pinMode(DISPLAY_LATCH_PIN, OUTPUT);
+  digitalWrite(DISPLAY_LATCH_PIN, LOW);
+  shiftOut(DISPLAY_DATA_PIN, DISPLAY_CLOCK_PIN, MSBFIRST, 0xFF);
+  digitalWrite(DISPLAY_LATCH_PIN, HIGH);
+
+  for (uint8_t i = 0; i < FLOOR_COUNT; i++) {
+    pinMode(FLOOR_SENSOR_PINS[i], INPUT);
+  }
+
+  Wire.begin();
+  Wire.beginTransmission(PCF8574_ADDRESS);
+  Wire.write(0xFF);
+  const uint8_t pcf8574Status = Wire.endTransmission();
+
+  pcf8574RawState = 0xFF;
+  candidatePcf8574State = 0xFF;
+  previousPcf8574RawState = 0xFF;
+
+  Serial.begin(9600);
+  Serial.println(F("Smart Elevator: startup complete"));
+  Serial.println(emergencyLatched ? F("Emergency: ACTIVE") : F("Emergency: NORMAL"));
+  Serial.println(pcf8574Status == 0 ? F("PCF8574: FOUND") : F("PCF8574: NOT FOUND"));
+  Serial.println(F("Motor output: DISABLED"));
+
+  const unsigned long now = millis();
+  for (uint8_t i = 0; i < 8; i++) {
+    buttonStateChangeMs[i] = now;
+  }
+  for (uint8_t i = 0; i < FLOOR_COUNT; i++) {
+    floorSensorChangeMs[i] = now;
+  }
+
+  positionStartupCheckMs = now;
+  resetButtonChangeMs = now;
+  lastButtonScanMs = now;
+  lastPositionScanMs = now;
+  lastSchedulingUpdateMs = now;
+  lastAudioUpdateMs = now;
+}
+
+void loop() {
+  const unsigned long now = millis();
+
+  updateSafetyManager(now);
+
+  if (now - lastButtonScanMs >= BUTTON_SCAN_INTERVAL_MS) {
+    lastButtonScanMs = now;
+    readButtons(now);
+  }
+
+  if (now - lastPositionScanMs >= POSITION_SCAN_INTERVAL_MS) {
+    lastPositionScanMs = now;
+    readFloorSensors(now);
+  }
+
+  // Service a newly reached target before the scheduler selects another one.
+  updateElevatorController();
+
+  if (now - lastSchedulingUpdateMs >= SCHEDULING_INTERVAL_MS) {
+    lastSchedulingUpdateMs = now;
+    updateScheduling();
+  }
+
+  updateElevatorController();
+  updateDirectionLeds();
+  updateDisplay();
+  updateAudioManager(now);
+}
