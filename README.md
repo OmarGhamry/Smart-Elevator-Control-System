@@ -31,7 +31,7 @@ The current pin map and component behavior are documented in [hardware/wiring-an
 - Drive the motor up/down and stop on a detected floor.
 - Display the current floor using the 7-segment display.
 - Provide audible arrival and fault/emergency alerts.
-- Latch an emergency stop until a deliberate manual reset is accepted after the emergency switch is released and the cabin position is confirmed.
+- Latch an emergency stop until a deliberate manual reset is accepted after the emergency switch is released and the cabin position is confirmed. Clear all pending internal and external requests when the emergency is first latched.
 
 ## Firmware Modules
 
