@@ -479,6 +479,18 @@ void updateScheduling() {
     return;
   }
 
+  // A request for the floor the cabin is already on must be served
+  // immediately; it must never be interpreted as a DOWN movement.
+  if (isFloorRequested(currentFloor - 1)) {
+    clearFloorRequests(currentFloor - 1);
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::IDLE;
+    Serial.print(F("Current floor request served: Floor "));
+    Serial.println(currentFloor);
+    return;
+  }
+
   const uint8_t nextFloor = findNextRequestedFloor();
 
   if (nextFloor == 0) {
