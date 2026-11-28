@@ -74,7 +74,8 @@ tests/      Test cases and verification notes
 - [x] Integrated Proteus tests passed for same-floor request handling, automatic travel in both directions, intermediate-floor detection without stopping, target-floor stopping, request clearing, emergency stop during automatic movement, and manual emergency reset after position confirmation. Emergency remains latched after the button is released, and all pending requests are cleared when it is first latched.
 - [x] Direction indicator LEDs verified in integrated movement tests: green LED (D8) ON while moving up, red LED (A2) ON while moving down, and both OFF while stopped.
 - [x] Display Manager verified in integrated Proteus tests: the display shows the confirmed starting floor, updates at each detected floor while travelling without stopping at intermediate floors, and remains blank when the startup position is unknown.
-- [ ] Complete Audio Manager integration and broader full-system Proteus scenarios.
+- [x] Audio Manager arrival notification verified: a short 1500 Hz beep plays for 150 ms when the elevator reaches its requested target floor, without blocking the main loop.
+- [ ] Emergency and position-unknown audio alerts, plus broader full-system Proteus scenarios.
 - [ ] Physical prototype validation and safety review.
 
 ## Team Git Workflow
