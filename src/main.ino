@@ -131,6 +131,36 @@ const uint8_t FLOOR_DISPLAY_PATTERNS[FLOOR_COUNT] = {
 
 uint8_t lastDisplayedFloor = 0xFF;
 
+// -----------------------------------------------------------------------------
+// Audio Manager — non-blocking floor-arrival notification
+// -----------------------------------------------------------------------------
+
+constexpr unsigned int ARRIVAL_BEEP_FREQUENCY_HZ = 1500;
+constexpr unsigned long ARRIVAL_BEEP_DURATION_MS = 150;
+
+bool arrivalBeepPending = false;
+bool arrivalBeepActive = false;
+unsigned long arrivalBeepStartedMs = 0;
+
+void requestArrivalBeep() {
+  arrivalBeepPending = true;
+}
+
+void updateAudioManager(unsigned long now) {
+  if (arrivalBeepPending) {
+    tone(SPEAKER_PIN, ARRIVAL_BEEP_FREQUENCY_HZ);
+    arrivalBeepStartedMs = now;
+    arrivalBeepActive = true;
+    arrivalBeepPending = false;
+  }
+
+  if (arrivalBeepActive &&
+      now - arrivalBeepStartedMs >= ARRIVAL_BEEP_DURATION_MS) {
+    noTone(SPEAKER_PIN);
+    arrivalBeepActive = false;
+  }
+}
+
 void writeDisplayPattern(uint8_t pattern) {
   digitalWrite(DISPLAY_LATCH_PIN, LOW);
   shiftOut(DISPLAY_DATA_PIN, DISPLAY_CLOCK_PIN, MSBFIRST, pattern);
@@ -612,6 +642,7 @@ void updateElevatorController() {
 
     Serial.print(F("Target reached: Floor "));
     Serial.println(currentFloor);
+    requestArrivalBeep();
     return;
   }
 
@@ -733,4 +764,5 @@ void loop() {
   updateElevatorController();
   updateDirectionLeds();
   updateDisplay();
+  updateAudioManager(now);
 }
