@@ -17,12 +17,14 @@ constexpr unsigned long BUTTON_DEBOUNCE_MS = 40;
 constexpr unsigned long POSITION_SCAN_INTERVAL_MS = 20;
 constexpr unsigned long SENSOR_DEBOUNCE_MS = 30;
 constexpr unsigned long POSITION_STARTUP_CHECK_MS = 50;
+constexpr unsigned long RESET_DEBOUNCE_MS = 40;
 
 // -----------------------------------------------------------------------------
 // Arduino Uno pin mapping
 // -----------------------------------------------------------------------------
 
 constexpr uint8_t EMERGENCY_PIN = A0;  // NC switch: HIGH = normal, LOW = pressed
+constexpr uint8_t RESET_PIN = 7;       // NO push button: LOW while pressed
 constexpr uint8_t SPEAKER_PIN   = A1;
 
 constexpr uint8_t I2C_SDA_PIN = A4;
@@ -100,6 +102,10 @@ unsigned long lastPositionScanMs = 0;
 unsigned long lastSchedulingUpdateMs = 0;
 unsigned long lastDisplayUpdateMs = 0;
 unsigned long lastAudioUpdateMs = 0;
+
+bool resetButtonStableHigh = true;
+bool resetButtonCandidateHigh = true;
+unsigned long resetButtonChangeMs = 0;
 
 // -----------------------------------------------------------------------------
 // Request Manager — stores and clears floor requests
@@ -268,6 +274,90 @@ void readFloorSensors(unsigned long now) {
 }
 
 // -----------------------------------------------------------------------------
+// Safety Manager — emergency latch and guarded manual reset
+// -----------------------------------------------------------------------------
+
+bool isPositionConfirmedForReset() {
+  if (!positionSensorsInitialized || !positionKnown ||
+      currentFloor < 1 || currentFloor > FLOOR_COUNT) {
+    return false;
+  }
+
+  uint8_t activeSensorCount = 0;
+  uint8_t activeFloor = 0;
+
+  for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+    if (floorSensorStates[floorIndex]) {
+      activeSensorCount++;
+      activeFloor = floorIndex + 1;
+    }
+  }
+
+  return activeSensorCount == 1 && activeFloor == currentFloor;
+}
+
+void attemptEmergencyReset() {
+  if (!emergencyLatched) {
+    return;
+  }
+
+  // The emergency NC switch must be released before reset is accepted.
+  if (digitalRead(EMERGENCY_PIN) == LOW) {
+    Serial.println(F("Reset denied: emergency button is still pressed"));
+    return;
+  }
+
+  // Never resume motion from an uncertain or unconfirmed cabin position.
+  if (!isPositionConfirmedForReset()) {
+    Serial.println(F("Reset denied: position is not confirmed"));
+    return;
+  }
+
+  emergencyLatched = false;
+  targetFloor = 0;
+  currentDirection = Direction::STOPPED;
+  elevatorState = ElevatorState::IDLE;
+
+  Serial.println(F("Emergency: RESET COMPLETE"));
+}
+
+void updateSafetyManager(unsigned long now) {
+  // Latch the emergency state. Releasing the NC button does not clear it.
+  if (digitalRead(EMERGENCY_PIN) == LOW && !emergencyLatched) {
+    emergencyLatched = true;
+    targetFloor = 0;
+    currentDirection = Direction::STOPPED;
+    elevatorState = ElevatorState::EMERGENCY;
+    Serial.println(F("Emergency: LATCHED"));
+  }
+
+  // Keep the Arduino motor command disabled for the entire latched state.
+  if (emergencyLatched) {
+    analogWrite(MOTOR_ENA_PIN, 0);
+    elevatorState = ElevatorState::EMERGENCY;
+  }
+
+  // Debounce the normally-open reset button (INPUT_PULLUP).
+  const bool rawResetHigh = (digitalRead(RESET_PIN) == HIGH);
+
+  if (rawResetHigh != resetButtonCandidateHigh) {
+    resetButtonCandidateHigh = rawResetHigh;
+    resetButtonChangeMs = now;
+  }
+
+  if (resetButtonCandidateHigh != resetButtonStableHigh &&
+      now - resetButtonChangeMs >= RESET_DEBOUNCE_MS) {
+    const bool wasHigh = resetButtonStableHigh;
+    resetButtonStableHigh = resetButtonCandidateHigh;
+
+    // A HIGH -> LOW transition is one deliberate reset-button press.
+    if (wasHigh && !resetButtonStableHigh) {
+      attemptEmergencyReset();
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Scheduling Manager — LOOK-style directional request selection
 // -----------------------------------------------------------------------------
 
@@ -394,6 +484,9 @@ void setup() {
   digitalWrite(MOTOR_IN2_PIN, LOW);
 
   pinMode(EMERGENCY_PIN, INPUT);
+  pinMode(RESET_PIN, INPUT_PULLUP);
+  resetButtonStableHigh = (digitalRead(RESET_PIN) == HIGH);
+  resetButtonCandidateHigh = resetButtonStableHigh;
   emergencyLatched = (digitalRead(EMERGENCY_PIN) == LOW);
   if (emergencyLatched) {
     elevatorState = ElevatorState::EMERGENCY;
@@ -437,6 +530,7 @@ void setup() {
   }
 
   positionStartupCheckMs = now;
+  resetButtonChangeMs = now;
   lastButtonScanMs = now;
   lastPositionScanMs = now;
   lastSchedulingUpdateMs = now;
@@ -446,6 +540,8 @@ void setup() {
 
 void loop() {
   const unsigned long now = millis();
+
+  updateSafetyManager(now);
 
   if (now - lastButtonScanMs >= BUTTON_SCAN_INTERVAL_MS) {
     lastButtonScanMs = now;
