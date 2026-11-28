@@ -8,6 +8,7 @@ This document records the wiring tested in the current Arduino Uno simulation. I
 |---|---|---|
 | A0 | Emergency signal | HIGH normally; LOW when the normally-closed button is pressed |
 | A1 | Speaker | Use `tone()` / `noTone()` for a clean tone |
+| A2 | Red LED | ON while moving DOWN; series resistor required |
 | A4 | PCF8574 SDA | I2C data |
 | A5 | PCF8574 SCL | I2C clock |
 | D2 | 74HC595 DS | Serial data |
@@ -15,8 +16,8 @@ This document records the wiring tested in the current Arduino Uno simulation. I
 | D4 | 74HC595 ST_CP | Latch clock |
 | D5 | L298 IN1 | Motor direction |
 | D6 | L298 IN2 | Motor direction |
-| D7 | Available | Not assigned |
-| D8 | Available | Not assigned |
+| D7 | Manual Reset button | NO push button to GND; INPUT_PULLUP |
+| D8 | Green LED | ON while moving UP; series resistor required |
 | D9 | L298 ENA through AND gate | PWM enable; default test PWM 150 |
 | D10 | IR sensor, Floor 1 | HIGH on detection |
 | D11 | IR sensor, Floor 2 | HIGH on detection |
@@ -24,6 +25,13 @@ This document records the wiring tested in the current Arduino Uno simulation. I
 | D13 | IR sensor, Floor 4 | HIGH on detection |
 
 Avoid using D0/D1 for application I/O while the Virtual Terminal is used for Serial debugging.
+
+## Direction Indicator LEDs
+
+- Green LED anode -> Arduino D8 through a 220Ω–330Ω series resistor; cathode -> GND.
+- Red LED anode -> Arduino A2 through a 220Ω–330Ω series resistor; cathode -> GND.
+- Green turns on only in `MOVING_UP`; red turns on only in `MOVING_DOWN`.
+- Both remain off in `IDLE`, `POSITION_UNKNOWN`, and `EMERGENCY`.
 
 ## PCF8574
 
