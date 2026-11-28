@@ -29,6 +29,7 @@ The current pin map and component behavior are documented in [hardware/wiring-an
 - Schedule pending requests using a direction-based collective policy (LOOK-like).
 - Determine the current floor from the four IR sensors.
 - Drive the motor up/down and stop on a detected floor.
+- Indicate upward travel with a green LED and downward travel with a red LED.
 - Display the current floor using the 7-segment display.
 - Provide audible arrival and fault/emergency alerts.
 - Latch an emergency stop until a deliberate manual reset is accepted after the emergency switch is released and the cabin position is confirmed. Clear all pending internal and external requests when the emergency is first latched.
