@@ -367,10 +367,18 @@ void updateSafetyManager(unsigned long now) {
   // Latch the emergency state. Releasing the NC button does not clear it.
   if (digitalRead(EMERGENCY_PIN) == LOW && !emergencyLatched) {
     emergencyLatched = true;
+
+    // Emergency cancels every pending cabin and hall request.
+    for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+      internalRequests[floorIndex] = false;
+      externalRequests[floorIndex] = false;
+    }
+
     targetFloor = 0;
     currentDirection = Direction::STOPPED;
     elevatorState = ElevatorState::EMERGENCY;
     Serial.println(F("Emergency: LATCHED"));
+    Serial.println(F("All pending requests cleared"));
   }
 
   // Keep the Arduino motor command disabled for the entire latched state.
