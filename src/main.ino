@@ -132,21 +132,65 @@ const uint8_t FLOOR_DISPLAY_PATTERNS[FLOOR_COUNT] = {
 uint8_t lastDisplayedFloor = 0xFF;
 
 // -----------------------------------------------------------------------------
-// Audio Manager — non-blocking floor-arrival notification
+// Audio Manager — non-blocking arrival and emergency notifications
 // -----------------------------------------------------------------------------
 
 constexpr unsigned int ARRIVAL_BEEP_FREQUENCY_HZ = 1500;
 constexpr unsigned long ARRIVAL_BEEP_DURATION_MS = 150;
 
+constexpr unsigned int EMERGENCY_BEEP_FREQUENCY_HZ = 1000;
+constexpr unsigned long EMERGENCY_BEEP_ON_MS = 120;
+constexpr unsigned long EMERGENCY_BEEP_OFF_MS = 120;
+
 bool arrivalBeepPending = false;
 bool arrivalBeepActive = false;
 unsigned long arrivalBeepStartedMs = 0;
+
+bool emergencyBeepInitialized = false;
+bool emergencyBeepActive = false;
+unsigned long emergencyBeepChangedMs = 0;
 
 void requestArrivalBeep() {
   arrivalBeepPending = true;
 }
 
 void updateAudioManager(unsigned long now) {
+  // Emergency audio has the highest priority and overrides arrival sounds.
+  if (emergencyLatched || elevatorState == ElevatorState::EMERGENCY) {
+    arrivalBeepPending = false;
+
+    if (arrivalBeepActive) {
+      noTone(SPEAKER_PIN);
+      arrivalBeepActive = false;
+    }
+
+    if (!emergencyBeepInitialized) {
+      tone(SPEAKER_PIN, EMERGENCY_BEEP_FREQUENCY_HZ);
+      emergencyBeepActive = true;
+      emergencyBeepChangedMs = now;
+      emergencyBeepInitialized = true;
+    } else if (emergencyBeepActive &&
+               now - emergencyBeepChangedMs >= EMERGENCY_BEEP_ON_MS) {
+      noTone(SPEAKER_PIN);
+      emergencyBeepActive = false;
+      emergencyBeepChangedMs = now;
+    } else if (!emergencyBeepActive &&
+               now - emergencyBeepChangedMs >= EMERGENCY_BEEP_OFF_MS) {
+      tone(SPEAKER_PIN, EMERGENCY_BEEP_FREQUENCY_HZ);
+      emergencyBeepActive = true;
+      emergencyBeepChangedMs = now;
+    }
+
+    return;
+  }
+
+  // Stop and reset the emergency pattern after a valid manual reset.
+  if (emergencyBeepInitialized) {
+    noTone(SPEAKER_PIN);
+    emergencyBeepInitialized = false;
+    emergencyBeepActive = false;
+  }
+
   if (arrivalBeepPending) {
     tone(SPEAKER_PIN, ARRIVAL_BEEP_FREQUENCY_HZ);
     arrivalBeepStartedMs = now;
@@ -160,6 +204,8 @@ void updateAudioManager(unsigned long now) {
     arrivalBeepActive = false;
   }
 }
+
+// -----------------------------------------------------------------------------
 
 void writeDisplayPattern(uint8_t pattern) {
   digitalWrite(DISPLAY_LATCH_PIN, LOW);
