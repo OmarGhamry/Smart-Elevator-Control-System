@@ -101,17 +101,59 @@ unsigned long lastDisplayUpdateMs = 0;
 unsigned long lastAudioUpdateMs = 0;
 
 // -----------------------------------------------------------------------------
+// Request Manager — stores and clears floor requests
+// -----------------------------------------------------------------------------
+
+void addInternalRequest(uint8_t floorIndex) {
+  if (floorIndex < FLOOR_COUNT) {
+    internalRequests[floorIndex] = true;
+  }
+}
+
+void addExternalRequest(uint8_t floorIndex) {
+  if (floorIndex < FLOOR_COUNT) {
+    externalRequests[floorIndex] = true;
+  }
+}
+
+bool hasRequests() {
+  for (uint8_t floorIndex = 0; floorIndex < FLOOR_COUNT; floorIndex++) {
+    if (internalRequests[floorIndex] || externalRequests[floorIndex]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void clearFloorRequests(uint8_t floorIndex) {
+  if (floorIndex >= FLOOR_COUNT) {
+    return;
+  }
+
+  const bool hadRequest =
+      internalRequests[floorIndex] || externalRequests[floorIndex];
+
+  internalRequests[floorIndex] = false;
+  externalRequests[floorIndex] = false;
+
+  if (hadRequest) {
+    Serial.print(F("Requests cleared at Floor "));
+    Serial.println(floorIndex + 1);
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Input Manager — PCF8574 buttons with per-button debouncing
 // -----------------------------------------------------------------------------
 
 void registerButtonPress(uint8_t buttonBit) {
   if (buttonBit < 4) {
-    externalRequests[buttonBit] = true;
+    addExternalRequest(buttonBit);
     Serial.print(F("External request: Floor "));
     Serial.println(buttonBit + 1);
   } else {
     const uint8_t floorIndex = buttonBit - 4;
-    internalRequests[floorIndex] = true;
+    addInternalRequest(floorIndex);
     Serial.print(F("Internal request: Floor "));
     Serial.println(floorIndex + 1);
   }
