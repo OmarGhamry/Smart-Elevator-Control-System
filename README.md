@@ -69,8 +69,8 @@ tests/      Test cases and verification notes
 
 - [x] Individual Proteus tests: motor direction/PWM, emergency hardware stop, four IR sensors, eight PCF8574 buttons, 74HC595 + common-anode display, and speaker output.
 - [x] Pin assignments recorded.
-- [x] Firmware foundation, Input Manager, Position Manager, Request Manager, LOOK-style Scheduling Manager, and Safety Manager implemented; Safety Manager emergency-latch/reset scenarios passed in Proteus.
-- [ ] Integrated state-machine and scheduler tests.
+- [x] Firmware foundation, Input Manager, Position Manager, Request Manager, LOOK-style Scheduling Manager, Safety Manager, and direction-neutral Motor Controller implemented. Proteus tests passed for emergency latch/reset, both motor rotation directions, motor stop, and emergency stop during motor rotation.
+- [ ] Integrate Scheduler, Position Manager, Safety Manager, and Motor Controller; then run integrated state-machine and scheduler tests.
 - [ ] Full-system Proteus scenarios.
 - [ ] Physical prototype validation and safety review.
 
